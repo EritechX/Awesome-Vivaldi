@@ -24,6 +24,10 @@ fi
 SOURCE_DIR=""; TEMP_DIR=""; BANNER_LINES=7; LAST_FRAME_LINES=0
 ESC=$(printf '\033')
 HEADLESS=${HEADLESS:-0}
+# bash 4.0+ accepts fractional `read -t`; bash 3.2 (macOS system bash) rejects
+# them outright, which silently swallowed the escape tail of every arrow key.
+# Only unbound keys (bare ESC) ever hit this timeout, so 1s costs nothing.
+if [ "${BASH_VERSINFO[0]}" -ge 4 ]; then KEY_TIMEOUT=0.01; else KEY_TIMEOUT=1; fi
 KEY_SEQ=(); KEY_IDX=0
 CRASH_LINE=0; CRASH_CMD=""
 EXIT_FLAG_FILE="${TMPDIR:-/tmp}/awesome-vivaldi-exit.$$"
@@ -450,7 +454,15 @@ exit_installer() {
     exit 0  # Immediately exit current (sub)shell — parent checks flag via _check_exit
 }
 
-flush_input() { while read -rsn1 -t 0.01 _ 2>/dev/null; do :; done; }
+# Drop stray keystrokes queued in the terminal. tty-only on purpose: under
+# `curl | bash` stdin is the script itself, so draining it would eat source.
+flush_input() {
+    [ "$HEADLESS" = "1" ] && return 0
+    local tty="/dev/tty"; [ -c "$tty" ] || return 0
+    { stty -icanon min 1 time 0 < "$tty"; } 2>/dev/null || return 0
+    while IFS= read -rsn1 -t "$KEY_TIMEOUT" _ < "$tty" 2>/dev/null; do :; done
+    { stty icanon < "$tty"; } 2>/dev/null || true
+}
 
 # ── Step indicator ────────────────────────────────────────────
 
@@ -505,7 +517,7 @@ read_key() {
     fi
     # Read from /dev/tty when stdin is a pipe (e.g. curl|bash), fall back to stdin
     local tty="/dev/tty"; [ -c "$tty" ] || tty=""
-    { [ -n "$tty" ] && stty -echo -icanon < "$tty"; } 2>/dev/null || true
+    { [ -n "$tty" ] && stty -echo -icanon min 1 time 0 < "$tty"; } 2>/dev/null || true
     local key
     if [ -n "$tty" ]; then
         IFS= read -rsn1 key < "$tty" 2>/dev/null || true
@@ -513,11 +525,11 @@ read_key() {
         IFS= read -rsn1 key 2>/dev/null || true
     fi
     if [ "$key" = $'\x1b' ]; then
-        local rest
+        local rest=""
         if [ -n "$tty" ]; then
-            read -rsn2 -t 0.01 rest < "$tty" 2>/dev/null || true
+            IFS= read -rsn2 -t "$KEY_TIMEOUT" rest < "$tty" 2>/dev/null || true
         else
-            read -rsn2 -t 0.01 rest 2>/dev/null || true
+            IFS= read -rsn2 -t "$KEY_TIMEOUT" rest 2>/dev/null || true
         fi
         case "$rest" in
             '[A') echo "UP";;
@@ -718,21 +730,27 @@ scan_mods() {
     local css_dir="$source_dir/CSS"; local js_dir="$source_dir/Javascripts"
     STANDALONE_CSS=(); BUNDLED_CSS=(); STANDALONE_JS=(); BUNDLED_JS=()
     local css_names=(); local js_names=()
+    if [ -d "$css_dir" ]; then for f in "$css_dir"/*.css; do [ -f "$f" ] && css_names+=("$(basename "$f" .css)"); done; fi
     if [ -d "$js_dir" ]; then for f in "$js_dir"/*.js; do [ -f "$f" ] || continue; local n="$(basename "$f")"; [ "$n" = "ModConfig.js" ] && continue; [ "$n" = "VividAI.js" ] && continue; [ "$n" = "VividMarkdown.js" ] && continue; js_names+=("$(basename "$f" .js)"); done; fi
     local bundled_keys=()
-    for cb in "${css_names[@]}"; do for jb in "${js_names[@]}"; do [ "$cb" = "$jb" ] && bundled_keys+=("$cb"); done; done
+    # bash 3.2 set -u: ${arr[@]} on an empty array = unbound variable
+    if [ "${#css_names[@]}" -gt 0 ] && [ "${#js_names[@]}" -gt 0 ]; then
+        for cb in "${css_names[@]}"; do for jb in "${js_names[@]}"; do [ "$cb" = "$jb" ] && bundled_keys+=("$cb"); done; done
+    fi
     _in_array() { local k="$1"; shift; for v in "$@"; do [ "$v" = "$k" ] && return 0; done; return 1; }
+    _is_bundled() { [ "${#bundled_keys[@]}" -gt 0 ] && _in_array "$1" "${bundled_keys[@]}"; }
     # CSS
     for f in "$css_dir"/*.css; do [ -f "$f" ] || continue; local name="$(basename "$f")"; local base="${name%.css}"
-        if _in_array "$base" "${bundled_keys[@]}"; then BUNDLED_CSS+=("$name|$base")
+        if _is_bundled "$base"; then BUNDLED_CSS+=("$name|$base")
         else STANDALONE_CSS+=("$name|$base"); fi; done
     [ "${#STANDALONE_CSS[@]}" -gt 0 ] && { IFS=$'\n'; STANDALONE_CSS=($(sort <<<"${STANDALONE_CSS[*]}")); unset IFS; }
     [ "${#BUNDLED_CSS[@]}" -gt 0 ]    && { IFS=$'\n'; BUNDLED_CSS=($(sort <<<"${BUNDLED_CSS[*]}")); unset IFS; }
     for f in "$js_dir"/*.js; do [ -f "$f" ] || continue; local name="$(basename "$f")"; local base="${name%.js}"; [ "$name" = "ModConfig.js" ] && continue; [ "$name" = "VividAI.js" ] && continue; [ "$name" = "VividMarkdown.js" ] && continue
-        if _in_array "$base" "${bundled_keys[@]}"; then BUNDLED_JS+=("$name|$base|${name%.js}.css")
+        if _is_bundled "$base"; then BUNDLED_JS+=("$name|$base|${name%.js}.css")
         else STANDALONE_JS+=("$name|$base|"); fi; done
     [ "${#STANDALONE_JS[@]}" -gt 0 ]  && { IFS=$'\n'; STANDALONE_JS=($(sort <<<"${STANDALONE_JS[*]}")); unset IFS; }
     [ "${#BUNDLED_JS[@]}" -gt 0 ]     && { IFS=$'\n'; BUNDLED_JS=($(sort <<<"${BUNDLED_JS[*]}")); unset IFS; }
+    return 0  # trailing `&&` guard above must not propagate 1 into `set -e`
 }
 
 # ============================================================
