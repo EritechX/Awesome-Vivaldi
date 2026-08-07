@@ -212,6 +212,7 @@
         }));
       applyHiddenPins();
       renderDock();
+      injectFavoritesHidden();
     } finally {
       state.syncing = false;
     }
@@ -234,6 +235,58 @@
       el.classList.toggle("favdock-hidden", id != null && favIds.has(String(id)));
     }
     reflowStrip();
+  }
+
+  // ─── Vivaldi-native hiding (pageIdsHiddenForDrag) ────────────────────
+  // createFlexBoxLayout zeroes the yoga size of every tab whose id sits in
+  // the TabStrip's pageIdsHiddenForDrag prop — native "hidden but fully
+  // present, zero layout space", exactly what a favorites dock needs. We
+  // merge the favorites' ids into that set through the component's own
+  // setter, located via the React fiber (AGENTS.md fiber-walk technique).
+  // Skipped during drags: Vivaldi owns the set then (drag source hiding);
+  // after drag end Vivaldi clears it, so endDragState re-injects.
+
+  function findTabStripFiber() {
+    const strip = document.querySelector(".tab-strip");
+    if (!strip) return null;
+    let node = strip;
+    while (node) {
+      const key = Object.keys(node).find((k) => k.startsWith("__reactFiber$"));
+      if (key) {
+        let fiber = node[key];
+        while (fiber) {
+          if (fiber.memoizedProps &&
+              typeof fiber.memoizedProps.setPageIdsHiddenForDrag === "function") {
+            return fiber;
+          }
+          fiber = fiber.return;
+        }
+      }
+      node = node.parentElement;
+    }
+    return null;
+  }
+
+  function injectFavoritesHidden() {
+    if (state.dragging) return; // Vivaldi manages the set during drags
+    if (state.favorites.length === 0) return; // never touch an empty set
+    const fiber = findTabStripFiber();
+    if (!fiber) return;
+    const { pageIdsHiddenForDrag: cur, setPageIdsHiddenForDrag } = fiber.memoizedProps;
+    if (!cur || typeof setPageIdsHiddenForDrag !== "function") return;
+    const favIds = state.favorites.map((f) => f.tabId);
+    try {
+      const hasAll = favIds.every((id) => cur.has(id));
+      const onlyFavs = cur.every((id) => favIds.includes(id));
+      if (hasAll && onlyFavs) return; // already in sync
+      let next = cur;
+      if (!hasAll) next = next.union(favIds);
+      if (!onlyFavs) next = next.subtract(cur.filter((id) => !favIds.includes(id)));
+      setPageIdsHiddenForDrag(next);
+      console.log("[FavDock] injected", favIds.length, "favorites into pageIdsHiddenForDrag");
+    } catch (err) {
+      console.error("[FavDock] injectFavoritesHidden failed:", err);
+    }
   }
 
   // Vivaldi's yoga layout assigns every tab a contiguous --PositionY via
@@ -502,6 +555,8 @@
     hideDropZone();
     reflowStrip(); // restore contiguous layout immediately
     setTimeout(reflowStrip, 120); // after Vivaldi's maybeResetDragging tail
+    injectFavoritesHidden(); // Vivaldi cleared the set on drag end
+    setTimeout(injectFavoritesHidden, 200); // after maybeResetDragging
     scheduleSync(); // final invariant pass (no-op while dragging)
   }
   function setupDragDetection() {
