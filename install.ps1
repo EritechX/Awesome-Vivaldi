@@ -116,6 +116,7 @@ $Script:Loc = @{
 		default_off_reason_TidyAddress         = "Sends URLs to AI service for rewriting"
 		default_off_reason_TabManager          = "Redundant with Vivaldi built-in workspace management"
 		default_off_reason_Diabar              = "Sends page content to AI service for Q&A"
+		default_off_reason_PinnedTabRestore    = "Zen-style pinned tab behavior change — niche feature"
 		step_ai        = "AI"
 		# ── Manage summary ──
 		manage_confirm_title  = "Confirm Changes"
@@ -325,6 +326,7 @@ $Script:Loc = @{
 		default_off_reason_TidyAddress         = "将网址发送至 AI 服务进行改写"
 		default_off_reason_TabManager          = "与 Vivaldi 内置工作区管理功能重复"
 		default_off_reason_Diabar              = "将页面内容发送至 AI 服务进行问答"
+		default_off_reason_PinnedTabRestore    = "修改固定标签行为 — 仅适用于特定使用场景"
 		manage_confirm_title  = "变更确认"
 		manage_applying       = "正在应用更改..."
 		manage_new_mods       = "新增安装"
@@ -481,6 +483,8 @@ $Script:DefaultOff = @{
 	"Diabar.js"             = $true
 	"TidyAddress.js"        = $true
 	"TabManager.js"         = $true
+    "PinnedTabRestore.js"  = $true
+    "PinnedTabRestore.css" = $true
 }
 
 # ── Mod category definitions ────────────────────────────────────────
@@ -576,6 +580,7 @@ $Script:ModJsFiles = @(
 	"TidyTabs.js",
 	"TidyTitles.js",
 	"VividPeek.js",
+	"VividPlayer.js",
 	"VividToast.js",
 	"WorkspaceThemeSwitcher.js",
 	"VividAI.js",
@@ -1071,7 +1076,19 @@ function Get-InstallState {
 	if (-not (Test-Path $stateFile)) {
 		$legacyFile = Join-Path $userModsDir ".awesome-vivaldi.json"
 		if (Test-Path $legacyFile) { $stateFile = $legacyFile }
-		else { return $null }
+		else {
+			# Legacy: check .vivaldimods/<version>/ (Awesome Vivaldi format)
+			$vivaldiModsDir = Join-Path $VivaldiDir ".vivaldimods"
+			if (Test-Path $vivaldiModsDir) {
+				$versions = Get-ChildItem $vivaldiModsDir -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^\d' } | Sort-Object Name -Descending
+				foreach ($v in $versions) {
+					$vf = Join-Path $v.FullName ".volante.json"
+					if (-not (Test-Path $vf)) { $vf = Join-Path $v.FullName ".awesome-vivaldi.json" }
+					if (Test-Path $vf) { $stateFile = $vf; $userModsDir = $v.FullName; break }
+				}
+			}
+			if (-not (Test-Path $stateFile)) { return $null }
+		}
 	}
 	try {
 		$json = Get-Content -Raw -Path $stateFile | ConvertFrom-Json
@@ -1081,6 +1098,7 @@ function Get-InstallState {
 			JsMods    = @($json.js_mods)
 			GitCommit = if ($json.PSObject.Properties.Name -contains 'git_commit') { $json.git_commit } else { "" }
 			StateFile = $stateFile
+			ModDir    = $userModsDir
 		}
 	} catch {
 		return $null
@@ -1090,7 +1108,14 @@ function Get-InstallState {
 function Test-IsInstalled {
 	param([string]$VivaldiDir)
 	$userModsDir = Join-Path $VivaldiDir "user_mods"
-	return (Test-Path $userModsDir)
+	if (Test-Path $userModsDir) { return $true }
+	# Legacy: check .vivaldimods/<version>/ (Awesome Vivaldi format)
+	$vivaldiModsDir = Join-Path $VivaldiDir ".vivaldimods"
+	if (Test-Path $vivaldiModsDir) {
+		$versions = Get-ChildItem $vivaldiModsDir -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^\d' } | Sort-Object Name -Descending
+		if ($versions.Count -gt 0) { return $true }
+	}
+	return $false
 }
 
 # ============================================================
@@ -1456,6 +1481,7 @@ function Deploy-ModFiles {
 	param(
 		[string]$SourceDir,
 		[string]$VivaldiDir,
+		[string]$ModDir = $null,
 		[string]$PersistentDir = $null,
 		[string[]]$CssMods,
 		[string[]]$JsMods
@@ -1463,7 +1489,7 @@ function Deploy-ModFiles {
 
 	Write-Host (tr deploy_start)
 
-	$userModsDir = Join-Path $VivaldiDir "user_mods"
+	$userModsDir = if ($ModDir) { $ModDir } else { Join-Path $VivaldiDir "user_mods" }
 	$userCssDir  = Join-Path $userModsDir "css"
 	$userJsDir   = Join-Path $userModsDir "js"
 
@@ -1781,8 +1807,10 @@ function Invoke-Update {
 	# Check which installed mods differ from source
 	$sourceCssDir = Join-Path $SourceDir "CSS"
 	$sourceJsDir  = Join-Path $SourceDir "Javascripts"
-	$userCssDir   = Join-Path $Target.VivaldiDir "user_mods\css"
-	$userJsDir    = Join-Path $Target.VivaldiDir "user_mods\js"
+	# Use ModDir from state (supports legacy .vivaldimods path)
+	$modBase = if ($State.ModDir) { $State.ModDir } else { Join-Path $Target.VivaldiDir "user_mods" }
+	$userCssDir   = Join-Path $modBase "css"
+	$userJsDir    = Join-Path $modBase "js"
 
 	$updatableCSS = @()
 	foreach ($mod in $State.CssMods) {
@@ -2939,6 +2967,9 @@ Test-WindowHtmlFormat -VivaldiDir $Target.VivaldiDir
 		}
 	}
 
+	# Exclude silent install mods from diff — they're always deployed, not user-selectable
+	$visibleInstalled = $installedBases | Where-Object { $Script:SilentInstall -notcontains $_ }
+
 	$currentPage = 0
 	$pagesConfirmed = @($false) * $totalPages
 	$selectedStyle = @()
@@ -3382,6 +3413,7 @@ function Invoke-AIOnlyFlow {
 				js_mods      = $newJS
 			}
 			$statePath = Join-Path $vivaldiDir "user_mods\.volante.json"
+			if ($State.StateFile) { $statePath = $State.StateFile }
 			$newState | ConvertTo-Json | Set-Content -Path $statePath
 		}
 
@@ -3504,13 +3536,17 @@ function Invoke-AIOnlyFlow {
 		$cssFiles = @()
 		$jsFiles = @()
 		foreach ($base in $result) {
-			if ($Script:ModJsFiles.ContainsKey($base)) { $jsFiles += $Script:ModJsFiles[$base] }
-			if ($Script:ModCssFiles.ContainsKey($base)) { $cssFiles += $Script:ModCssFiles[$base] }
+			$jsFile = "$base.js"
+			$cssFile = "$base.css"
+			if ($Script:ModJsFiles -contains $jsFile) { $jsFiles += $jsFile }
+			if ($Script:ModCssFiles -contains $cssFile) { $cssFiles += $cssFile }
 		}
 		# Always include silent AI mods
 		foreach ($silentBase in $Script:SilentInstall) {
-			if ($Script:ModJsFiles.ContainsKey($silentBase) -and ($jsFiles -notcontains $Script:ModJsFiles[$silentBase])) { $jsFiles += $Script:ModJsFiles[$silentBase] }
-			if ($Script:ModCssFiles.ContainsKey($silentBase) -and ($cssFiles -notcontains $Script:ModCssFiles[$silentBase])) { $cssFiles += $Script:ModCssFiles[$silentBase] }
+			$jsFile = "$silentBase.js"
+			$cssFile = "$silentBase.css"
+			if (($Script:ModJsFiles -contains $jsFile) -and ($jsFiles -notcontains $jsFile)) { $jsFiles += $jsFile }
+			if (($Script:ModCssFiles -contains $cssFile) -and ($cssFiles -notcontains $cssFile)) { $cssFiles += $cssFile }
 		}
 
 		$deployedJs = Deploy-ModFiles -SourceDir $SourceDir -VivaldiDir $vivaldiDir -FileNames $jsFiles -SubDir "JS" -Extension ".js"
@@ -3622,6 +3658,240 @@ function Restore-FromPersistence {
 	$state | ConvertTo-Json | Set-Content -Path $statePath
 
 	Write-Host (trf restore_done $cssCount $jsCount)
+}
+
+function Invoke-ManageFlow {
+	param(
+		[string]$SourceDir,
+		[hashtable]$Target,
+		[object]$Mods,
+		[hashtable]$State
+	)
+
+	$e = [char]27
+
+	$stepLabels = @('step_style', 'step_function', 'step_ai', 'step_confirm')
+	$totalPages = 4
+
+	# Build installed base names from state
+	$installedBases = @()
+	foreach ($f in $State.CssMods) { $installedBases += [IO.Path]::GetFileNameWithoutExtension($f) }
+	foreach ($f in $State.JsMods)  { $installedBases += [IO.Path]::GetFileNameWithoutExtension($f) }
+	$installedBases = $installedBases | Select-Object -Unique
+
+	# Exclude silent install mods from diff — they're always deployed, not user-selectable
+	$visibleInstalled = @($installedBases | Where-Object { $Script:SilentInstall -notcontains $_ })
+
+	$currentPage = 0
+	$pagesConfirmed = @($false) * $totalPages
+	$selectedStyle    = @()
+	$selectedFunction = @()
+	$selectedAI       = @()
+
+	:pageLoop while ($true) {
+		switch ($currentPage) {
+			0 {
+				Set-StepInfo 0 $totalPages $stepLabels
+				$Script:PagesConfirmed = $pagesConfirmed
+				$result = Show-SelectCategory `
+					-CategoryKey "style_title" `
+					-IntroKey "style_intro" `
+					-Mods $Mods.Style `
+					-PreselectedBases $visibleInstalled `
+					-DefaultAll $false `
+					-AllowLeft $true
+
+				if ($null -eq $result) { return $null }
+				$selectedStyle = $result
+				$pagesConfirmed[0] = $true
+				$currentPage = 1
+			}
+			1 {
+				Set-StepInfo 1 $totalPages $stepLabels
+				$Script:PagesConfirmed = $pagesConfirmed
+				$result = Show-SelectCategory `
+					-CategoryKey "function_title" `
+					-IntroKey "function_intro" `
+					-Mods $Mods.Function `
+					-PreselectedBases $visibleInstalled `
+					-DefaultAll $false `
+					-AllowLeft $true
+
+				if ($null -eq $result) {
+					$pagesConfirmed[0] = $false
+					$currentPage = 0
+					continue
+				}
+				$selectedFunction = $result
+				$pagesConfirmed[1] = $true
+				$currentPage = 2
+			}
+			2 {
+				Set-StepInfo 2 $totalPages $stepLabels
+				$Script:PagesConfirmed = $pagesConfirmed
+				$result = Show-SelectCategory `
+					-CategoryKey "ai_title" `
+					-IntroKey "ai_intro" `
+					-Mods $Mods.AI `
+					-PreselectedBases $visibleInstalled `
+					-DefaultAll $false `
+					-AllowLeft $true
+
+				if ($null -eq $result) {
+					$pagesConfirmed[1] = $false
+					$currentPage = 1
+					continue
+				}
+				$selectedAI = $result
+				$pagesConfirmed[2] = $true
+				$currentPage = 3
+			}
+			3 {
+				# Compute diff
+				$newBases = @($selectedStyle + $selectedFunction + $selectedAI) | Select-Object -Unique
+				$oldBases = $visibleInstalled
+
+				$addedBases   = $newBases | Where-Object { $_ -notin $oldBases }
+				$removedBases = $oldBases | Where-Object { $_ -notin $newBases }
+				$changed = ($addedBases.Count -gt 0 -or $removedBases.Count -gt 0)
+
+				Set-StepInfo 3 $totalPages $stepLabels
+				$Script:PagesConfirmed = $pagesConfirmed
+
+				$confirmDone = $false
+				$confirmBack = $false
+				while (-not $confirmDone) {
+					$sb = [Text.StringBuilder]::new()
+					[void]$sb.AppendLine()
+					[void]$sb.AppendLine((Format-StepBar))
+					[void]$sb.AppendLine()
+					[void]$sb.AppendLine("  $e[1m$(tr manage_confirm_title)$e[0m")
+					[void]$sb.AppendLine()
+
+					if ($addedBases.Count -gt 0) {
+						[void]$sb.AppendLine("  $e[32m$(tr manage_new_mods) ($($addedBases.Count)):$e[0m")
+						foreach ($b in $addedBases) { [void]$sb.AppendLine("    $e[32m+ $b$e[0m") }
+					}
+					if ($removedBases.Count -gt 0) {
+						[void]$sb.AppendLine("  $e[31m$(tr manage_removed_mods) ($($removedBases.Count)):$e[0m")
+						foreach ($b in $removedBases) { [void]$sb.AppendLine("    $e[31m- $b$e[0m") }
+					}
+					$keptCount = ($newBases | Where-Object { $_ -in $oldBases }).Count
+					if ($keptCount -gt 0) {
+						$keptNames = ($newBases | Where-Object { $_ -in $oldBases }) -join ', '
+						[void]$sb.AppendLine("  $e[90m$(tr manage_unchanged_mods) ($keptCount): $keptNames$e[0m")
+					}
+
+					if (-not $changed) {
+						[void]$sb.AppendLine("  $e[90m$(tr manage_no_changes)$e[0m")
+					}
+
+					[void]$sb.AppendLine()
+					[void]$sb.AppendLine("  $e[90m" + ("─" * 50) + "$e[0m")
+					[void]$sb.AppendLine("    $e[90m$(tr confirm_deploy_hint)$e[0m")
+
+					Write-FrameContent $sb.ToString()
+
+					$key = Read-TuiKey
+					switch ($key) {
+						'ENTER' {
+							if (-not $changed) { continue }
+							$confirmDone = $true
+						}
+						'LEFT'  { $currentPage = 2; $confirmDone = $true; $confirmBack = $true }
+						'RIGHT' { }
+						'LANG' { Toggle-Lang }
+						'Q'     { Exit-Installer }
+						'ESC'   { Exit-Installer }
+					}
+				}
+
+				if ($confirmBack) {
+					$pagesConfirmed[3] = $false
+					continue
+				}
+				break pageLoop
+			}
+		}
+	}
+
+	# Permission check
+	if (-not (Test-Writable $Target.VivaldiDir)) {
+		$sb = [Text.StringBuilder]::new()
+		[void]$sb.AppendLine()
+		[void]$sb.AppendLine("  $e[1;31m$(tr error_permission)$e[0m")
+		[void]$sb.AppendLine("  $(tr target_path): $($Target.VivaldiDir)")
+		if ($Target.IsSystem) {
+			[void]$sb.AppendLine("  $e[90m$(tr error_admin_required)$e[0m")
+			[void]$sb.AppendLine()
+			[void]$sb.AppendLine("  $e[1;33m$(tr elevate_prompt)$e[0m")
+			Write-FrameContent $sb.ToString()
+			$key = Read-TuiKey
+			if ($key -eq 'ENTER') {
+				$scriptPath = if ($PSCommandPath) { $PSCommandPath } else { (Get-Command $MyInvocation.MyCommand.Name).Source }
+				Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File \`"$scriptPath\`"" -Verb RunAs
+				Exit-Installer
+			}
+			Exit-Installer
+		} else {
+			[void]$sb.AppendLine()
+			[void]$sb.AppendLine("  $e[90m$(tr key_exit)$e[0m")
+			Write-FrameContent $sb.ToString()
+			Read-TuiKey | Out-Null
+		}
+		return $null
+	}
+
+	# Show deploying status
+	$sb = [Text.StringBuilder]::new()
+	[void]$sb.AppendLine()
+	[void]$sb.AppendLine("  $e[1m$(tr manage_applying)$e[0m")
+	[void]$sb.AppendLine("  $(tr target_path): $($Target.VivaldiDir)")
+	[void]$sb.AppendLine()
+	Write-FrameContent $sb.ToString()
+
+	# Remove unchecked mods
+	$vivaldiDir = $Target.VivaldiDir
+	$modBase = if ($State.ModDir) { $State.ModDir } else { Join-Path $vivaldiDir "user_mods" }
+	$userCssDir = Join-Path $modBase "css"
+	$userJsDir  = Join-Path $modBase "js"
+
+	foreach ($b in $removedBases) {
+		$cssFile = "$b.css"
+		if ($Script:ModCssFiles -contains $cssFile) {
+			$p = Join-Path $userCssDir $cssFile
+			if (Test-Path $p) { Remove-Item $p -Force; Write-Host "  $e[31m- $cssFile$e[0m" }
+		}
+		$jsFile = "$b.js"
+		if ($Script:ModJsFiles -contains $jsFile) {
+			$p = Join-Path $userJsDir $jsFile
+			if (Test-Path $p) { Remove-Item $p -Force; Write-Host "  $e[31m- $jsFile$e[0m" }
+		}
+	}
+
+	# Build deploy lists from new selection
+	$deployCSS = @()
+	$deployJS  = @()
+	# Always include silent install mods (core dependencies)
+	foreach ($b in $Script:SilentInstall) {
+		if ($Script:ModJsFiles -contains "$b.js") { $deployJS += "$b.js" }
+		if ($Script:ModCssFiles -contains "$b.css") { $deployCSS += "$b.css" }
+	}
+	foreach ($b in $newBases) {
+		if ($Script:ModCssFiles -contains "$b.css") { $deployCSS += "$b.css" }
+		if ($Script:ModJsFiles -contains "$b.js") { $deployJS += "$b.js" }
+	}
+
+	Deploy-ModFiles -SourceDir $SourceDir -VivaldiDir $vivaldiDir -PersistentDir $Target.PersistentDir -CssMods $deployCSS -JsMods $deployJS
+	Invoke-HtmlInjection -VivaldiDir $vivaldiDir
+
+	Write-Host ""
+	Write-Host "$e[1;32m" + ("=" * 52) + "$e[0m"
+	Write-Host "  $e[1;32m$(tr deploy_success)$e[0m"
+	Write-Host "$e[1;32m" + ("=" * 52) + "$e[0m"
+
+	return @{ CSS = $deployCSS; JS = $deployJS }
+	Deploy-ModFiles -SourceDir $SourceDir -VivaldiDir $vivaldiDir -ModDir $modBase -PersistentDir $Target.PersistentDir -CssMods $deployCSS -JsMods $deployJS
 }
 
 # ============================================================

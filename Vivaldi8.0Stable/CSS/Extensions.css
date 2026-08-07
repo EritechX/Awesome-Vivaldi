@@ -1,7 +1,7 @@
 /* ==UserStyle==
  * @name         Extension Menu
  * @description  CSS modification for a vertical extension dropdown menu, similar to Chrome.
- * @version      2026.4.19
+ * @version      2026.8.7
  * @author       @quodroc, PaRr0tBoY
  * @website      https://forum.vivaldi.net/post/742203
  * ==/UserStyle==
@@ -33,6 +33,7 @@
 .extensionIconPopupMenu {
   --popupWidth: 280px !important;
   align-items: flex-start !important;
+  border-radius: var(--radius) !important;
 }
 
 .extensionIconPopupMenu > .toolbar {
@@ -61,3 +62,21 @@
   top: auto;
   right: 10px;
 }
+
+/* ========================================
+  EXTENSION SETTINGS POPUP
+  ======================================== */
+
+.extension-popup {
+  max-height: calc(100vh - 45px);
+  overflow-y: auto;
+  scrollbar-width: none;
+  border-radius: var(--radius) !important;
+}
+
+.extension-popup.top,
+.extension-popup.left,
+.extension-popup.right {
+  top: 45px !important;
+}
+
