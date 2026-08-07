@@ -985,23 +985,14 @@
       updateDockVisibility();
     }
 
-    // Zen-style: the dock is its own section ABOVE the tab list (preceding
-    // sibling of #tabs-container), never inside it — the strip's yoga
-    // layout, .separate divider and scroll area stay untouched.
-    const host = container.parentNode;
-    if (state.mountedContainer !== host || !host?.contains(state.root)) {
-      if (host && host !== document.body) {
-        host.insertBefore(state.root, container);
-      } else {
-        container.prepend(state.root);
-      }
-      state.mountedContainer = host || container;
-      console.log(
-        "[FavDock] ✓ mounted",
-        host && host !== document.body
-          ? "before " + container.id + " in " + host.tagName.toLowerCase() + "." + (host.className || "")
-          : "in " + container.id
-      );
+    // Mount at the top of #tabs-container (the strip's own column). The
+    // sibling-mount experiment (parent container) broke the sidebar layout
+    // because the parent's flex orientation is unknown — revert to the
+    // proven in-container position; reflowStrip keeps the strip contiguous.
+    if (state.mountedContainer !== container || !container.contains(state.root)) {
+      container.prepend(state.root);
+      state.mountedContainer = container;
+      console.log("[FavDock] ✓ mounted in", container.id);
     }
   }
 

@@ -28,9 +28,11 @@
 
 /* ─── Dock Container ────────────────────────────────────────────────── */
 
-/* Vertical tab mode (the dock mounts as a sibling BEFORE #tabs-container) */
-#browser.tabs-left .fav-dock,
-#browser.tabs-right .fav-dock {
+/* Vertical tab mode */
+#browser.tabs-left #tabs-container .fav-dock,
+#browser.tabs-right #tabs-container .fav-dock,
+#browser.tabs-left #tabs-tabbar-container .fav-dock,
+#browser.tabs-right #tabs-tabbar-container .fav-dock {
   position: sticky;
   top: 0;
   z-index: 5; /* above tab-positions (--ZIndex 1-2), below toolbar (10+) */
