@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="../assets/readme/hero-80.svg" width="100%" alt="Volante — Vivaldi 8.0 Stable Installation Guide">
+  <img src="../Others/assets/hero-80.svg" width="100%" alt="Volante — Vivaldi 8.0 Stable Installation Guide">
 </p>
 
 <div align="center">

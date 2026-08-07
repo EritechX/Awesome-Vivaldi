@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./assets/readme/hero.svg" width="100%" alt="Volante — Mods that turn Vivaldi Browser into Arc">
+  <img src="./Others/assets/hero.svg" width="100%" alt="Volante — Mods that turn Vivaldi Browser into Arc">
 </p>
 
 <div align="center">
@@ -44,7 +44,7 @@ To uninstall, run the same script again.
 ---
 
 <p align="center">
-  <img src="./assets/readme/section-showcase.svg" width="100%" alt="Feature Showcase">
+  <img src="./Others/assets/section-showcase.svg" width="100%" alt="Feature Showcase">
 </p>
 
 | Feature                                         | Mod Files                            | What it does                                                                                 |
@@ -56,7 +56,7 @@ To uninstall, run the same script again.
 ---
 
 <p align="center">
-  <img src="./assets/readme/section-max.svg" width="100%" alt="Vivaldi MAX AI Features">
+  <img src="./Others/assets/section-max.svg" width="100%" alt="Vivaldi MAX AI Features">
 </p>
 
 Requires an [OpenAI-compatible API key](https://github.com/cheahjs/free-llm-api-resources?tab=readme-ov-file#opencode-zen). Configure in `vivaldi:settings/appearance/` → Volante settings.
