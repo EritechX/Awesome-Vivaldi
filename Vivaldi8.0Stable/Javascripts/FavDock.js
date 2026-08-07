@@ -247,10 +247,10 @@
     const strip = document.querySelector(".tab-strip");
     if (!strip) return;
     let y = 0;
-    for (const el of strip.querySelectorAll(".tab-position")) {
+    for (const el of strip.querySelectorAll(".tab-position, .separate")) {
       if (el.classList.contains("favdock-hidden")) continue;
       el.style.setProperty("--PositionY", `${y}px`);
-      y += parseFloat(el.style.getPropertyValue("--Height")) || 33;
+      y += el.offsetHeight || 33;
     }
   }
 
@@ -488,6 +488,8 @@
     }
     state.root?.classList.remove("fav-dock-dragover");
     hideDropZone();
+    reflowStrip(); // restore contiguous layout immediately
+    setTimeout(reflowStrip, 120); // after Vivaldi's maybeResetDragging tail
     scheduleSync(); // final invariant pass (no-op while dragging)
   }
   function setupDragDetection() {
