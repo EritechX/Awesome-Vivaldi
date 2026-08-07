@@ -28,14 +28,12 @@
 
 /* ─── Dock Container ────────────────────────────────────────────────── */
 
-/* Vertical tab mode */
-#browser.tabs-left #tabs-container .fav-dock,
-#browser.tabs-right #tabs-container .fav-dock,
-#browser.tabs-left #tabs-tabbar-container .fav-dock,
-#browser.tabs-right #tabs-tabbar-container .fav-dock {
+/* Vertical tab mode (the dock mounts as a sibling BEFORE #tabs-container) */
+#browser.tabs-left .fav-dock,
+#browser.tabs-right .fav-dock {
   position: sticky;
   top: 0;
-  z-index: 1; /* above the tab strip, below the toolbar/mainbar (10+) */
+  z-index: 5; /* above tab-positions (--ZIndex 1-2), below toolbar (10+) */
   padding: var(--favdock-gap);
   background: transparent;
   flex-shrink: 0;
@@ -240,17 +238,6 @@
 
 .fav-dock-menu-item:hover {
   background: var(--colorHighlightBg, rgba(255, 255, 255, 0.1));
-}
-
-/* ─── Separator between dock and tab-strip ─────────────────────────── */
-
-.fav-dock + .tab-strip::before {
-  content: "";
-  display: block;
-  height: 1px;
-  margin: var(--favdock-gap) var(--favdock-gap) calc(var(--favdock-gap) * 2);
-  background: var(--colorFg, currentColor);
-  opacity: 0.1;
 }
 
 /* Dock visibility is controlled by JS inline display (favorites exist or

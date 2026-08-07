@@ -243,11 +243,22 @@
   // changes, and the strip observer re-applies afterwards). Skipped during
   // drags — Vivaldi's live reordering uses its internal layout tree.
   function reflowStrip() {
-    if (state.dragging) return;
+    // Skip only while Vivaldi live-moves strip tabs (React rewrites
+    // --PositionY continuously); dock-sourced drags never touch the strip.
+    if (state.dragging && !state.dockDragTabId) return;
     const strip = document.querySelector(".tab-strip");
     if (!strip) return;
+    const sep = document.querySelector(".tab-strip .separate") ||
+                document.querySelector(".separate");
     let y = 0;
-    for (const el of strip.querySelectorAll(".tab-position, .separate")) {
+    let sepPlaced = false;
+    for (const el of strip.querySelectorAll(".tab-position")) {
+      // yoga places the pinned separator before the first non-pinned tab.
+      if (!sepPlaced && sep && !el.classList.contains("is-pinned")) {
+        sep.style.setProperty("--PositionY", `${y}px`);
+        y += sep.offsetHeight || 18;
+        sepPlaced = true;
+      }
       if (el.classList.contains("favdock-hidden")) continue;
       el.style.setProperty("--PositionY", `${y}px`);
       y += el.offsetHeight || 33;
@@ -406,6 +417,7 @@
     const showGrid = state.favorites.length > 0;
     state.grid.style.display = showGrid ? "flex" : "none";
     updateDockVisibility();
+    reflowStrip(); // dock height changed → re-reserve the strip offset
   }
 
   function updateDockVisibility() {
@@ -973,10 +985,23 @@
       updateDockVisibility();
     }
 
-    if (state.mountedContainer !== container || !container.contains(state.root)) {
-      container.prepend(state.root);
-      state.mountedContainer = container;
-      console.log("[FavDock] ✓ mounted in", container.id);
+    // Zen-style: the dock is its own section ABOVE the tab list (preceding
+    // sibling of #tabs-container), never inside it — the strip's yoga
+    // layout, .separate divider and scroll area stay untouched.
+    const host = container.parentNode;
+    if (state.mountedContainer !== host || !host?.contains(state.root)) {
+      if (host && host !== document.body) {
+        host.insertBefore(state.root, container);
+      } else {
+        container.prepend(state.root);
+      }
+      state.mountedContainer = host || container;
+      console.log(
+        "[FavDock] ✓ mounted",
+        host && host !== document.body
+          ? "before " + container.id + " in " + host.tagName.toLowerCase() + "." + (host.className || "")
+          : "in " + container.id
+      );
     }
   }
 
