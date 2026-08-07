@@ -37,6 +37,7 @@
 }
 
 .extensionIconPopupMenu > .toolbar {
+  width: 100%;
   max-height: 50vh;
   overflow-y: auto;
   overflow-x: hidden;
@@ -54,8 +55,11 @@
 
 .extensionIconPopupMenu .ExtensionDropdownIcon > button::after {
   content: attr(title);
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .button-toolbar > button > .button-badge {
