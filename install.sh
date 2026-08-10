@@ -166,7 +166,7 @@ tr() {
             restore_fresh)            echo "否 — 全新安装" ;;
             restore_copying)          echo "正在从持久化存储恢复模组..." ;;
             restore_done)             echo "已从旧版本恢复 {0} CSS + {1} JS 模组." ;;
-            error_admin_required)     echo "需要管理员权限." ;;
+            error_admin_required)     echo "需要管理员权限. 请使用 sudo ./install.sh 重新运行." ;;
             error_download)           echo "错误: 无法下载模组包. 请检查网络连接." ;;
             error_extract)            echo "错误: 无法解压模组包." ;;
             error_no_source)          echo "错误: 找不到模组源文件." ;;
@@ -310,7 +310,7 @@ tr() {
             restore_fresh)            echo "No — start fresh" ;;
             restore_copying)          echo "Restoring mods from persistent storage..." ;;
             restore_done)             echo "Restored {0} CSS + {1} JS mods from previous version." ;;
-            error_admin_required)     echo "Administrator privileges required." ;;
+            error_admin_required)     echo "Administrator privileges required. Please re-run with: sudo ./install.sh" ;;
             error_download)           echo "ERROR: Failed to download modpack. Check your internet connection." ;;
             error_extract)            echo "ERROR: Failed to extract modpack archive." ;;
             error_no_source)          echo "ERROR: Could not locate mod source files." ;;
@@ -648,25 +648,16 @@ ensure_mod_source() {
 }
 
 # ============================================================
-#  6.  Vivaldi Installation Discovery (macOS)
+#  6.  Vivaldi Installation Discovery (macOS / Linux)
 # ============================================================
 
 find_vivaldi_installations() {
     local found=(); local seen=()
 
-    # Shared: add a Vivaldi installation from a Framework path
-    _add_install() {
-        local framework="$1"
-        local resources_dir="${framework}/Resources/vivaldi"
+    _add_entry() {
+        local app_path="$1"; local resources_dir="$2"; local display_name="$3"; local version="$4"
         [ -f "$resources_dir/window.html" ] || return 0
-        local app_path; app_path="${framework%%/Contents/Frameworks/Vivaldi Framework.framework*}"
-        local app_name; app_name="$(basename "$app_path" .app)"
-        local display_name="Vivaldi"
-        case "$app_name" in *Snapshot*|*snapshot*) display_name="Vivaldi Snapshot" ;; esac
-        local version=""
-        [ -f "$app_path/Contents/Info.plist" ] && version="$(plutil -extract CFBundleShortVersionString raw "$app_path/Contents/Info.plist" 2>/dev/null || echo "unknown")"
         local key="${resources_dir}"
-        # bash 3.2 (macOS): ${arr[*]} / ${arr[@]} on empty array + set -u = unbound variable
         local _dup=0
         if [ "${#seen[@]}" -gt 0 ]; then
             for _s in "${seen[@]}"; do [ "$_s" = "$key" ] && { _dup=1; break; }; done
@@ -677,47 +668,96 @@ find_vivaldi_installations() {
         fi
     }
 
-    # 0th: Direct paths (instant O(1) — Vivaldi install paths are predictable)
-    if [ -z "${VIVALDI_TEST_PATH:-}" ]; then
-        local direct_frameworks=(
-            "/Applications/Vivaldi.app/Contents/Frameworks/Vivaldi Framework.framework"
-            "/Applications/Vivaldi Snapshot.app/Contents/Frameworks/Vivaldi Framework.framework"
-            "$HOME/Applications/Vivaldi.app/Contents/Frameworks/Vivaldi Framework.framework"
-            "$HOME/Applications/Vivaldi Snapshot.app/Contents/Frameworks/Vivaldi Framework.framework"
-        )
-        for framework in "${direct_frameworks[@]}"; do
-            [ -d "$framework" ] && _add_install "$framework"
-        done
+    if [ "$(uname -s)" = "Darwin" ]; then
+        # Shared: add a Vivaldi installation from a Framework path
+        _add_install() {
+            local framework="$1"
+            local resources_dir="${framework}/Resources/vivaldi"
+            [ -f "$resources_dir/window.html" ] || return 0
+            local app_path; app_path="${framework%%/Contents/Frameworks/Vivaldi Framework.framework*}"
+            local app_name; app_name="$(basename "$app_path" .app)"
+            local display_name="Vivaldi"
+            case "$app_name" in *Snapshot*|*snapshot*) display_name="Vivaldi Snapshot" ;; esac
+            local version=""
+            [ -f "$app_path/Contents/Info.plist" ] && version="$(plutil -extract CFBundleShortVersionString raw "$app_path/Contents/Info.plist" 2>/dev/null || echo "unknown")"
+            _add_entry "$app_path" "$resources_dir" "$display_name" "$version"
+        }
+
+        # 0th: Direct paths (instant O(1) — Vivaldi install paths are predictable)
+        if [ -z "${VIVALDI_TEST_PATH:-}" ]; then
+            local direct_frameworks=(
+                "/Applications/Vivaldi.app/Contents/Frameworks/Vivaldi Framework.framework"
+                "/Applications/Vivaldi Snapshot.app/Contents/Frameworks/Vivaldi Framework.framework"
+                "$HOME/Applications/Vivaldi.app/Contents/Frameworks/Vivaldi Framework.framework"
+                "$HOME/Applications/Vivaldi Snapshot.app/Contents/Frameworks/Vivaldi Framework.framework"
+            )
+            for framework in "${direct_frameworks[@]}"; do
+                [ -d "$framework" ] && _add_install "$framework"
+            done
+        else
+            # Test mode: inject a synthetic framework path
+            _add_install "$VIVALDI_TEST_PATH/Vivaldi.app/Contents/Frameworks/Vivaldi Framework.framework"
+        fi
+
+        # 1st: mdfind (Spotlight index, ~instant) — supplement for non-standard installs
+        if [ -z "${VIVALDI_TEST_PATH:-}" ]; then
+            while IFS= read -r -d '' framework; do
+                _add_install "$framework"
+            done < <(mdfind "kMDItemFSName == 'Vivaldi Framework.framework'" -0 2>/dev/null || true)
+        fi
+
+        # 2nd: find (filesystem walk) — used when mdfind empty, or in test mode
+        if [ ${#found[@]} -eq 0 ]; then
+            local search_paths=("/Applications" "$HOME/Applications")
+            [ -n "${VIVALDI_TEST_PATH:-}" ] && search_paths=("$VIVALDI_TEST_PATH")
+            while IFS= read -r -d '' framework; do
+                _add_install "$framework"
+            done < <(find "${search_paths[@]}" -type d -name "Vivaldi Framework.framework" -print0 2>/dev/null)
+        fi
+
+        # 3rd: mdfind for window.html (catch non-standard install layouts) — skip in test mode
+        if [ ${#found[@]} -eq 0 ] && [ -z "${VIVALDI_TEST_PATH:-}" ]; then
+            while IFS= read -r html_path; do
+                [[ "$html_path" == *"Vivaldi"* ]] && [[ "$html_path" == *"Resources/vivaldi/window.html" ]] || continue
+                local resources_dir; resources_dir="$(dirname "$html_path")"
+                local framework; framework="$(dirname "$(dirname "$resources_dir")")"
+                _add_install "$framework"
+            done < <(mdfind "kMDItemFSName == 'window.html'" 2>/dev/null || true)
+        fi
     else
-        # Test mode: inject a synthetic framework path
-        _add_install "$VIVALDI_TEST_PATH/Vivaldi.app/Contents/Frameworks/Vivaldi Framework.framework"
+        # Linux discovery
+        _add_linux_install() {
+            local app_p="$1"; local res_d="$2"; local disp_n="$3"
+            [ -f "$res_d/window.html" ] || return 0
+            local version=""
+            if [ -x "$app_p/vivaldi" ]; then
+                version="$("$app_p/vivaldi" --version 2>/dev/null | awk '{print $2}' || true)"
+            fi
+            if [ -z "$version" ] && command -v vivaldi &>/dev/null; then
+                version="$(vivaldi --version 2>/dev/null | awk '{print $2}' || true)"
+            fi
+            [ -z "$version" ] && version="unknown"
+            _add_entry "$app_p" "$res_d" "$disp_n" "$version"
+        }
+
+        if [ -n "${VIVALDI_TEST_PATH:-}" ]; then
+            _add_linux_install "$VIVALDI_TEST_PATH" "$VIVALDI_TEST_PATH/resources/vivaldi" "Vivaldi"
+        else
+            local system_paths=(
+                "/opt/vivaldi|/opt/vivaldi/resources/vivaldi|Vivaldi"
+                "/opt/vivaldi-snapshot|/opt/vivaldi-snapshot/resources/vivaldi|Vivaldi Snapshot"
+                "/usr/share/vivaldi|/usr/share/vivaldi/resources/vivaldi|Vivaldi"
+                "/usr/lib/vivaldi|/usr/lib/vivaldi/resources/vivaldi|Vivaldi"
+                "$HOME/.local/share/flatpak/app/com.vivaldi.Vivaldi/current/active/files/extra/opt/vivaldi|$HOME/.local/share/flatpak/app/com.vivaldi.Vivaldi/current/active/files/extra/opt/vivaldi/resources/vivaldi|Vivaldi (Flatpak)"
+                "/var/lib/flatpak/app/com.vivaldi.Vivaldi/current/active/files/extra/opt/vivaldi|/var/lib/flatpak/app/com.vivaldi.Vivaldi/current/active/files/extra/opt/vivaldi/resources/vivaldi|Vivaldi (Flatpak System)"
+            )
+            for entry in "${system_paths[@]}"; do
+                IFS='|' read -r app_p res_d disp_n <<< "$entry"
+                [ -d "$res_d" ] && _add_linux_install "$app_p" "$res_d" "$disp_n"
+            done
+        fi
     fi
 
-    # 1st: mdfind (Spotlight index, ~instant) — supplement for non-standard installs
-    if [ -z "${VIVALDI_TEST_PATH:-}" ]; then
-        while IFS= read -r -d '' framework; do
-            _add_install "$framework"
-        done < <(mdfind "kMDItemFSName == 'Vivaldi Framework.framework'" -0 2>/dev/null || true)
-    fi
-
-    # 2nd: find (filesystem walk) — used when mdfind empty, or in test mode
-    if [ ${#found[@]} -eq 0 ]; then
-        local search_paths=("/Applications" "$HOME/Applications")
-        [ -n "${VIVALDI_TEST_PATH:-}" ] && search_paths=("$VIVALDI_TEST_PATH")
-        while IFS= read -r -d '' framework; do
-            _add_install "$framework"
-        done < <(find "${search_paths[@]}" -type d -name "Vivaldi Framework.framework" -print0 2>/dev/null)
-    fi
-
-    # 3rd: mdfind for window.html (catch non-standard install layouts) — skip in test mode
-    if [ ${#found[@]} -eq 0 ] && [ -z "${VIVALDI_TEST_PATH:-}" ]; then
-        while IFS= read -r html_path; do
-            [[ "$html_path" == *"Vivaldi"* ]] && [[ "$html_path" == *"Resources/vivaldi/window.html" ]] || continue
-            local resources_dir; resources_dir="$(dirname "$html_path")"
-            local framework; framework="$(dirname "$(dirname "$resources_dir")")"
-            _add_install "$framework"
-        done < <(mdfind "kMDItemFSName == 'window.html'" 2>/dev/null || true)
-    fi
     printf '%s\n' "${found[@]}"
 }
 
@@ -1120,15 +1160,37 @@ post_install() {
     flush_input
     sleep 0.1
     local vivaldi_running=0
-    pgrep -q Vivaldi 2>/dev/null && vivaldi_running=1
+    if [ "$(uname -s)" = "Darwin" ]; then
+        pgrep -q Vivaldi 2>/dev/null && vivaldi_running=1
+    else
+        pgrep -f "vivaldi" 2>/dev/null && vivaldi_running=1
+    fi
+
+    _launch_linux_vivaldi() {
+        local bin_cmd="vivaldi"
+        if [ -x "$app_path/vivaldi" ]; then
+            bin_cmd="$app_path/vivaldi"
+        elif command -v vivaldi &>/dev/null; then
+            bin_cmd="vivaldi"
+        elif command -v vivaldi-stable &>/dev/null; then
+            bin_cmd="vivaldi-stable"
+        fi
+        nohup "$bin_cmd" --debug-packed-apps --silent-debugger-extension-api >/dev/null 2>&1 &
+    }
+
     if [ "$vivaldi_running" = "1" ]; then
         echo ""; echo "$(tr post_vivaldi_running)"; echo ""
         printf "%s " "$(tr post_restart_prompt)"
         local key; key="$(read_key)"
         if [ "$key" = "Y" ] || [ "$key" = "ENTER" ]; then
             echo "Y"; echo ""; echo "  $(tr post_restarting)"
-            pkill Vivaldi 2>/dev/null || true; sleep 1
-            open "$app_path" --args --debug-packed-apps --silent-debugger-extension-api 2>/dev/null || open -a Vivaldi
+            if [ "$(uname -s)" = "Darwin" ]; then
+                pkill Vivaldi 2>/dev/null || true; sleep 1
+                open "$app_path" --args --debug-packed-apps --silent-debugger-extension-api 2>/dev/null || open -a Vivaldi
+            else
+                pkill -f "vivaldi" 2>/dev/null || true; sleep 1
+                _launch_linux_vivaldi
+            fi
             echo "  Vivaldi restarted."
         else echo "N"; fi
     else
@@ -1136,7 +1198,11 @@ post_install() {
         local key; key="$(read_key)"
         if [ "$key" = "Y" ] || [ "$key" = "ENTER" ]; then
             echo "Y"
-            open "$app_path" --args --debug-packed-apps --silent-debugger-extension-api 2>/dev/null || open -a Vivaldi
+            if [ "$(uname -s)" = "Darwin" ]; then
+                open "$app_path" --args --debug-packed-apps --silent-debugger-extension-api 2>/dev/null || open -a Vivaldi
+            else
+                _launch_linux_vivaldi
+            fi
             echo "  Vivaldi launched."
         else echo "N"; fi
     fi
