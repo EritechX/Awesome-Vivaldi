@@ -727,33 +727,35 @@ find_vivaldi_installations() {
     else
         # Linux discovery
         _add_linux_install() {
-            local app_p="$1"; local res_d="$2"; local disp_n="$3"
-            [ -f "$res_d/window.html" ] || return 0
+            local app_path="$1"; local display_name="$2"
+            local resources_dir="$app_path/resources/vivaldi"
+            [ -f "$resources_dir/window.html" ] || return 0
+
             local version=""
-            if [ -x "$app_p/vivaldi" ]; then
-                version="$("$app_p/vivaldi" --version 2>/dev/null | awk '{print $2}' || true)"
+            if [ -x "$app_path/vivaldi" ]; then
+                version="$("$app_path/vivaldi" --version 2>/dev/null | awk '{print $2}' || true)"
             fi
             if [ -z "$version" ] && command -v vivaldi &>/dev/null; then
                 version="$(vivaldi --version 2>/dev/null | awk '{print $2}' || true)"
             fi
             [ -z "$version" ] && version="unknown"
-            _add_entry "$app_p" "$res_d" "$disp_n" "$version"
+            _add_entry "$app_path" "$resources_dir" "$display_name" "$version"
         }
 
         if [ -n "${VIVALDI_TEST_PATH:-}" ]; then
-            _add_linux_install "$VIVALDI_TEST_PATH" "$VIVALDI_TEST_PATH/resources/vivaldi" "Vivaldi"
+            _add_linux_install "$VIVALDI_TEST_PATH" "Vivaldi"
         else
             local system_paths=(
-                "/opt/vivaldi|/opt/vivaldi/resources/vivaldi|Vivaldi"
-                "/opt/vivaldi-snapshot|/opt/vivaldi-snapshot/resources/vivaldi|Vivaldi Snapshot"
-                "/usr/share/vivaldi|/usr/share/vivaldi/resources/vivaldi|Vivaldi"
-                "/usr/lib/vivaldi|/usr/lib/vivaldi/resources/vivaldi|Vivaldi"
-                "$HOME/.local/share/flatpak/app/com.vivaldi.Vivaldi/current/active/files/extra/opt/vivaldi|$HOME/.local/share/flatpak/app/com.vivaldi.Vivaldi/current/active/files/extra/opt/vivaldi/resources/vivaldi|Vivaldi (Flatpak)"
-                "/var/lib/flatpak/app/com.vivaldi.Vivaldi/current/active/files/extra/opt/vivaldi|/var/lib/flatpak/app/com.vivaldi.Vivaldi/current/active/files/extra/opt/vivaldi/resources/vivaldi|Vivaldi (Flatpak System)"
+                "/opt/vivaldi|Vivaldi"
+                "/opt/vivaldi-snapshot|Vivaldi Snapshot"
+                "/usr/share/vivaldi|Vivaldi"
+                "/usr/lib/vivaldi|Vivaldi"
+                "$HOME/.local/share/flatpak/app/com.vivaldi.Vivaldi/current/active/files/extra/opt/vivaldi|Vivaldi (Flatpak)"
+                "/var/lib/flatpak/app/com.vivaldi.Vivaldi/current/active/files/extra/opt/vivaldi|Vivaldi (Flatpak System)"
             )
             for entry in "${system_paths[@]}"; do
-                IFS='|' read -r app_p res_d disp_n <<< "$entry"
-                [ -d "$res_d" ] && _add_linux_install "$app_p" "$res_d" "$disp_n"
+                IFS='|' read -r app_path display_name <<< "$entry"
+                _add_linux_install "$app_path" "$display_name"
             done
         fi
     fi
@@ -1159,38 +1161,48 @@ post_install() {
     tput cnorm 2>/dev/null || true
     flush_input
     sleep 0.1
-    local vivaldi_running=0
-    if [ "$(uname -s)" = "Darwin" ]; then
-        pgrep -q Vivaldi 2>/dev/null && vivaldi_running=1
-    else
-        pgrep -f "vivaldi" 2>/dev/null && vivaldi_running=1
-    fi
 
-    _launch_linux_vivaldi() {
-        local bin_cmd="vivaldi"
-        if [ -x "$app_path/vivaldi" ]; then
-            bin_cmd="$app_path/vivaldi"
-        elif command -v vivaldi &>/dev/null; then
-            bin_cmd="vivaldi"
-        elif command -v vivaldi-stable &>/dev/null; then
-            bin_cmd="vivaldi-stable"
+    _is_vivaldi_running() {
+        if [ "$(uname -s)" = "Darwin" ]; then
+            pgrep -q Vivaldi 2>/dev/null
+        else
+            pgrep -f "vivaldi" 2>/dev/null
         fi
-        nohup "$bin_cmd" --debug-packed-apps --silent-debugger-extension-api >/dev/null 2>&1 &
     }
 
-    if [ "$vivaldi_running" = "1" ]; then
+    _stop_vivaldi() {
+        if [ "$(uname -s)" = "Darwin" ]; then
+            pkill Vivaldi 2>/dev/null || true
+        else
+            pkill -f "vivaldi" 2>/dev/null || true
+        fi
+        sleep 1
+    }
+
+    _launch_vivaldi() {
+        if [ "$(uname -s)" = "Darwin" ]; then
+            open "$app_path" --args --debug-packed-apps --silent-debugger-extension-api 2>/dev/null || open -a Vivaldi
+        else
+            local bin_cmd="vivaldi"
+            if [ -x "$app_path/vivaldi" ]; then
+                bin_cmd="$app_path/vivaldi"
+            elif command -v vivaldi &>/dev/null; then
+                bin_cmd="vivaldi"
+            elif command -v vivaldi-stable &>/dev/null; then
+                bin_cmd="vivaldi-stable"
+            fi
+            nohup "$bin_cmd" --debug-packed-apps --silent-debugger-extension-api >/dev/null 2>&1 &
+        fi
+    }
+
+    if _is_vivaldi_running; then
         echo ""; echo "$(tr post_vivaldi_running)"; echo ""
         printf "%s " "$(tr post_restart_prompt)"
         local key; key="$(read_key)"
         if [ "$key" = "Y" ] || [ "$key" = "ENTER" ]; then
             echo "Y"; echo ""; echo "  $(tr post_restarting)"
-            if [ "$(uname -s)" = "Darwin" ]; then
-                pkill Vivaldi 2>/dev/null || true; sleep 1
-                open "$app_path" --args --debug-packed-apps --silent-debugger-extension-api 2>/dev/null || open -a Vivaldi
-            else
-                pkill -f "vivaldi" 2>/dev/null || true; sleep 1
-                _launch_linux_vivaldi
-            fi
+            _stop_vivaldi
+            _launch_vivaldi
             echo "  Vivaldi restarted."
         else echo "N"; fi
     else
@@ -1198,11 +1210,7 @@ post_install() {
         local key; key="$(read_key)"
         if [ "$key" = "Y" ] || [ "$key" = "ENTER" ]; then
             echo "Y"
-            if [ "$(uname -s)" = "Darwin" ]; then
-                open "$app_path" --args --debug-packed-apps --silent-debugger-extension-api 2>/dev/null || open -a Vivaldi
-            else
-                _launch_linux_vivaldi
-            fi
+            _launch_vivaldi
             echo "  Vivaldi launched."
         else echo "N"; fi
     fi
