@@ -410,9 +410,11 @@ write_frame() {
     local row=$((BANNER_LINES + 1))
     local line_count=0
     local buf=""
+    local plain_line
     while IFS= read -r line || [ -n "$line" ]; do
         buf="${buf}${e}[${row};0H${e}[K"
-        if [ ${#line} -ge "$w" ]; then
+        plain_line="$(echo "$line" | sed "s/${e}\\[[0-9;]*m//g")"
+        if [ "${#plain_line}" -ge "$w" ]; then
             buf="${buf}${line:0:$((w - 1))}"
         else
             buf="${buf}${line}"
@@ -445,8 +447,14 @@ test_writable() {
     return 1
 }
 
-show_permission_error_frame() {
-    local vivaldi_dir="$1"; local e="$ESC"
+show_error_frame() {
+    local err_title="$1"
+    local path_label="$2"
+    local path_val="$3"
+    local msg="$4"
+    local action_hint="$5"
+    local flow_result="${6:-error}"
+    local e="$ESC"
     clear_content
 
     local inner_w=60
@@ -458,21 +466,23 @@ show_permission_error_frame() {
         echo "  ${e}[1;31m│${e}[0m${text}${pad}${e}[1;31m│${e}[0m"
     }
 
-    local err_title="$(tr error_permission)"
-    local path_label="$(tr target_path)"
-    local admin_msg="$(tr error_admin_required)"
-
     local sb=""
     sb+=""$'\n'
     sb+="  ${e}[1;31m╭────────────────────────────────────────────────────────────╮${e}[0m"$'\n'
     sb+="$(_box_row "  ${e}[1;31m✖  ${err_title}${e}[0m" "  ✖  ${err_title}")"$'\n'
     sb+="  ${e}[1;31m├────────────────────────────────────────────────────────────┤${e}[0m"$'\n'
-    sb+="$(_box_row "" "")"$'\n'
-    sb+="$(_box_row "  ${e}[90m${path_label}:${e}[0m ${e}[1;37m${vivaldi_dir}${e}[0m" "  ${path_label}: ${vivaldi_dir}")"$'\n'
-    sb+="$(_box_row "" "")"$'\n'
-    sb+="$(_box_row "  ${e}[33m${admin_msg}${e}[0m" "  ${admin_msg}")"$'\n'
-    sb+="$(_box_row "" "")"$'\n'
-    sb+="$(_box_row "     ${e}[1;36msudo ./install.sh${e}[0m" "     sudo ./install.sh")"$'\n'
+    if [ -n "$path_label" ] || [ -n "$path_val" ]; then
+        sb+="$(_box_row "" "")"$'\n'
+        sb+="$(_box_row "  ${e}[90m${path_label}:${e}[0m ${e}[1;37m${path_val}${e}[0m" "  ${path_label}: ${path_val}")"$'\n'
+    fi
+    if [ -n "$msg" ]; then
+        sb+="$(_box_row "" "")"$'\n'
+        sb+="$(_box_row "  ${e}[33m${msg}${e}[0m" "  ${msg}")"$'\n'
+    fi
+    if [ -n "$action_hint" ]; then
+        sb+="$(_box_row "" "")"$'\n'
+        sb+="$(_box_row "     ${e}[1;36m${action_hint}${e}[0m" "     ${action_hint}")"$'\n'
+    fi
     sb+="$(_box_row "" "")"$'\n'
     sb+="  ${e}[1;31m╰────────────────────────────────────────────────────────────╯${e}[0m"$'\n\n'
     sb+="    ${e}[90mENTER confirm | ESC/Q exit${e}[0m"$'\n'
@@ -480,7 +490,18 @@ show_permission_error_frame() {
     write_frame "$sb"
     flush_input
     read_key > /dev/null
-    FLOW_RESULT="permission_error"
+    FLOW_RESULT="$flow_result"
+}
+
+show_permission_error_frame() {
+    local vivaldi_dir="$1"
+    show_error_frame \
+        "$(tr error_permission)" \
+        "$(tr target_path)" \
+        "$vivaldi_dir" \
+        "$(tr error_admin_required)" \
+        "sudo ./install.sh" \
+        "permission_error"
 }
 
 exit_installer() {
