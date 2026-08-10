@@ -1235,7 +1235,12 @@ post_install() {
         else
             pkill -f "vivaldi" 2>/dev/null || true
         fi
-        sleep 1
+        local waited=0
+        while _is_vivaldi_running && [ "$waited" -lt 25 ]; do
+            sleep 0.2
+            waited=$((waited + 1))
+        done
+        sleep 0.3
     }
 
     _launch_vivaldi() {
@@ -1250,7 +1255,30 @@ post_install() {
             elif command -v vivaldi-stable &>/dev/null; then
                 bin_cmd="vivaldi-stable"
             fi
-            nohup "$bin_cmd" --debug-packed-apps --silent-debugger-extension-api >/dev/null 2>&1 &
+
+            local is_flatpak=0
+            [[ "$app_path" == *flatpak* ]] && is_flatpak=1
+
+            if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then
+                if command -v systemd-run &>/dev/null; then
+                    if [ "$is_flatpak" -eq 1 ]; then
+                        systemd-run --machine="${SUDO_USER}@.host" --user --unit="vivaldi-launch-$$" \
+                            flatpak run com.vivaldi.Vivaldi --debug-packed-apps --silent-debugger-extension-api >/dev/null 2>&1 &
+                    else
+                        systemd-run --machine="${SUDO_USER}@.host" --user --unit="vivaldi-launch-$$" \
+                            "$bin_cmd" --debug-packed-apps --silent-debugger-extension-api >/dev/null 2>&1 &
+                    fi
+                else
+                    echo ""
+                    echo "  Notice: Running elevated. Please restart Vivaldi from your user session."
+                fi
+            else
+                if [ "$is_flatpak" -eq 1 ]; then
+                    nohup flatpak run com.vivaldi.Vivaldi --debug-packed-apps --silent-debugger-extension-api >/dev/null 2>&1 &
+                else
+                    nohup "$bin_cmd" --debug-packed-apps --silent-debugger-extension-api >/dev/null 2>&1 &
+                fi
+            fi
         fi
     }
 
