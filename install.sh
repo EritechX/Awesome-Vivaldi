@@ -5,7 +5,8 @@
 # @version      2026.7.14
 # @author       Ryan (Acid)
 # @website      https://github.com/PaRr0tBoY/Awesome-Vivaldi
-# @usage        curl -fsSL https://raw.githubusercontent.com/PaRr0tBoY/Awesome-Vivaldi/main/install.sh | bash
+# @usage        macOS: curl -fsSL https://raw.githubusercontent.com/PaRr0tBoY/Awesome-Vivaldi/main/install.sh | bash
+# @usage        Linux: curl -fsSL https://raw.githubusercontent.com/PaRr0tBoY/Awesome-Vivaldi/main/install.sh | sudo bash
 # ==/UserScript==
 #
 # Requirements: bash 3.2+, curl, tput, grep, sed

@@ -37,6 +37,12 @@ irm https://raw.githubusercontent.com/PaRr0tBoY/Awesome-Vivaldi/main/install.ps1
 curl -fsSL https://raw.githubusercontent.com/PaRr0tBoY/Awesome-Vivaldi/main/install.sh | bash
 ```
 
+**Linux** (bash):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/PaRr0tBoY/Awesome-Vivaldi/main/install.sh | sudo bash
+```
+
 > 若更倾向手动安装，请参见 **[Installation Guide](./Vivaldi8.0Stable/README.md)**。
 > 如果有一个编程代理，请让它：`Install https://github.com/PaRr0tBoY/Awesome-Vivaldi for me.`
 
