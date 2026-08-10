@@ -54,15 +54,18 @@ trap on_err ERR
 tty_printf() { [ "$HEADLESS" = "1" ] && return 0; { printf "$@" > /dev/tty; } 2>/dev/null || printf "$@"; }
 
 cleanup() {
+    local exit_code=$?
     { [ -c /dev/tty ] && stty echo icanon < /dev/tty; } 2>/dev/null || true
     tput cnorm 2>/dev/null || true
-    if [ "$EXIT_REQUESTED" = "1" ]; then
-        :  # User-requested exit, no FATAL message
-    elif [ "$CRASH_LINE" != "0" ]; then
-        printf "\n[FATAL line %d] %s\n" "$CRASH_LINE" "$CRASH_CMD"
-        tty_printf "\n${ESC}[1;31m[FATAL line %d] %s${ESC}[0m\n" "$CRASH_LINE" "$CRASH_CMD"
-    else
+    if [ "$EXIT_REQUESTED" = "1" ] || [ "$exit_code" -eq 0 ]; then
         tty_printf "${ESC}[%d;0H${ESC}[0J${ESC}[H" "$((BANNER_LINES + 1))"
+    else
+        printf "\n[FATAL line %d] %s (exit code %d)\n" "$CRASH_LINE" "$CRASH_CMD" "$exit_code"
+        tty_printf "\n${ESC}[1;31m[FATAL line %d] %s (exit code %d)${ESC}[0m\n" "$CRASH_LINE" "$CRASH_CMD" "$exit_code"
+        if [ "$HEADLESS" != "1" ] && [ -c /dev/tty ]; then
+            tty_printf "\n  Press any key to exit...\n"
+            read -rsn1 _ < /dev/tty 2>/dev/null || true
+        fi
     fi
     [ -n "$TEMP_DIR" ] && [ -d "$TEMP_DIR" ] && rm -rf "$TEMP_DIR"
     rm -f "$EXIT_FLAG_FILE"
@@ -389,7 +392,7 @@ is_default_off() {
 # ============================================================
 
 show_banner() {
-    clear
+    clear 2>/dev/null || true
     echo ""
     echo "▄████▄ ▄▄   ▄▄ ▄▄▄▄▄  ▄▄▄▄  ▄▄▄  ▄▄   ▄▄ ▄▄▄▄▄   ██  ██ ▄▄ ▄▄ ▄▄  ▄▄▄  ▄▄    ▄▄▄▄  ▄▄"
     echo "██▄▄██ ██ ▄ ██ ██▄▄  ███▄▄ ██▀██ ██▀▄▀██ ██▄▄    ██▄▄██ ██ ██▄██ ██▀██ ██    ██▀██ ██"
@@ -1098,6 +1101,7 @@ backup_window_html() {
     echo "$(tr deploy_backup_done) $bak_path"
     local persistent_dir="${2:-}"
     [ -n "$persistent_dir" ] && mkdir -p "$persistent_dir" && cp "$html_path" "$persistent_dir/window.html.orig" 2>/dev/null || true
+    return 0
 }
 
 verify_window_html() {
@@ -1109,6 +1113,7 @@ verify_window_html() {
     stale=$(( stale - injector ))
     [ "$stale" -gt 0 ] && echo "  ⚠ $stale stale script tag(s) in window.html — run installer again to clean"
     [ "$injector" -eq 0 ] && echo "  ⚠ injectMods.js missing from window.html"
+    return 0
 }
 
 inject_mod_loader() {
@@ -1124,6 +1129,7 @@ inject_mod_loader() {
         echo "$(tr deploy_inject_done)"
     fi
     verify_window_html "$vivaldi_dir"
+    return 0
 }
 
 deploy_mod_files() {
@@ -1301,6 +1307,7 @@ post_install() {
             echo "  Vivaldi launched."
         else echo "N"; fi
     fi
+    return 0
 }
 
 # ============================================================
@@ -1879,15 +1886,7 @@ main() {
             [ -n "$result" ] && break
             [ "$EXIT_REQUESTED" = 1 ] && break
         done
-        if [ "$result" = "uninstalled" ]; then
-            # Full uninstall just completed — restart Vivaldi to pick up restored window.html,
-            # then loop back to show the fresh install menu (Install/Exit only)
-            post_install "$app_path"
-            result=""
-            continue
-        fi
         post_install "$app_path"
-        break
 
     elif [ "$has_persist" = "1" ]; then
         # --- Cross-version restore ---
@@ -1949,7 +1948,11 @@ main() {
             break
         done
     fi
-        break  # Exit top-level loop (fresh install complete or exit)
+
+        # Re-evaluate state after any completed action and loop back to entry menu
+        is_installed=0; is_installed "$vivaldi_dir" && is_installed=1
+        has_state=0; get_install_state "$vivaldi_dir" 2>/dev/null && has_state=1
+        has_persist=0
     done  # End top-level while loop
     echo ""
 }
