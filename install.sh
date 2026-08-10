@@ -166,7 +166,7 @@ tr() {
             restore_fresh)            echo "否 — 全新安装" ;;
             restore_copying)          echo "正在从持久化存储恢复模组..." ;;
             restore_done)             echo "已从旧版本恢复 {0} CSS + {1} JS 模组." ;;
-            error_admin_required)     echo "需要管理员权限. 请使用 sudo ./install.sh 重新运行." ;;
+            error_admin_required)     echo "需要管理员权限. 请使用 sudo 重新运行程序:" ;;
             error_download)           echo "错误: 无法下载模组包. 请检查网络连接." ;;
             error_extract)            echo "错误: 无法解压模组包." ;;
             error_no_source)          echo "错误: 找不到模组源文件." ;;
@@ -310,7 +310,7 @@ tr() {
             restore_fresh)            echo "No — start fresh" ;;
             restore_copying)          echo "Restoring mods from persistent storage..." ;;
             restore_done)             echo "Restored {0} CSS + {1} JS mods from previous version." ;;
-            error_admin_required)     echo "Administrator privileges required. Please re-run with: sudo ./install.sh" ;;
+            error_admin_required)     echo "Administrator privileges required. Please re-run using:" ;;
             error_download)           echo "ERROR: Failed to download modpack. Check your internet connection." ;;
             error_extract)            echo "ERROR: Failed to extract modpack archive." ;;
             error_no_source)          echo "ERROR: Could not locate mod source files." ;;
@@ -443,6 +443,44 @@ test_writable() {
         return 0
     fi
     return 1
+}
+
+show_permission_error_frame() {
+    local vivaldi_dir="$1"; local e="$ESC"
+    clear_content
+
+    local inner_w=60
+    _box_row() {
+        local text="$1"; local plain="$2"
+        local pad_len=$(( inner_w - ${#plain} ))
+        [ "$pad_len" -lt 0 ] && pad_len=0
+        local pad; pad="$(printf '%*s' "$pad_len" '')"
+        echo "  ${e}[1;31m│${e}[0m${text}${pad}${e}[1;31m│${e}[0m"
+    }
+
+    local err_title="$(tr error_permission)"
+    local path_label="$(tr target_path)"
+    local admin_msg="$(tr error_admin_required)"
+
+    local sb=""
+    sb+=""$'\n'
+    sb+="  ${e}[1;31m╭────────────────────────────────────────────────────────────╮${e}[0m"$'\n'
+    sb+="$(_box_row "  ${e}[1;31m✖  ${err_title}${e}[0m" "  ✖  ${err_title}")"$'\n'
+    sb+="  ${e}[1;31m├────────────────────────────────────────────────────────────┤${e}[0m"$'\n'
+    sb+="$(_box_row "" "")"$'\n'
+    sb+="$(_box_row "  ${e}[90m${path_label}:${e}[0m ${e}[1;37m${vivaldi_dir}${e}[0m" "  ${path_label}: ${vivaldi_dir}")"$'\n'
+    sb+="$(_box_row "" "")"$'\n'
+    sb+="$(_box_row "  ${e}[33m${admin_msg}${e}[0m" "  ${admin_msg}")"$'\n'
+    sb+="$(_box_row "" "")"$'\n'
+    sb+="$(_box_row "     ${e}[1;36msudo ./install.sh${e}[0m" "     sudo ./install.sh")"$'\n'
+    sb+="$(_box_row "" "")"$'\n'
+    sb+="  ${e}[1;31m╰────────────────────────────────────────────────────────────╯${e}[0m"$'\n\n'
+    sb+="    ${e}[90mENTER confirm | ESC/Q exit${e}[0m"$'\n'
+
+    write_frame "$sb"
+    flush_input
+    read_key > /dev/null
+    FLOW_RESULT="permission_error"
 }
 
 exit_installer() {
@@ -1410,11 +1448,7 @@ install_flow() {
 
     # Permission check before touching Vivaldi's directory
     if ! test_writable "$vivaldi_dir"; then
-        local sb="${e}[1;31m$(tr error_permission)${e}[0m"$'\n'
-        sb+="  $(tr target_path): $vivaldi_dir"$'\n'
-        sb+="${e}[90m$(tr error_admin_required)${e}[0m"$'\n\n'
-        sb+="  ${e}[90m$(tr key_exit)${e}[0m"$'\n'
-        write_frame "$sb"; read_key > /dev/null
+        show_permission_error_frame "$vivaldi_dir"
         return 1
     fi
 
@@ -1531,11 +1565,7 @@ manage_flow() {
 
     # Permission check before touching Vivaldi's directory
     if ! test_writable "$vivaldi_dir"; then
-        local sb="${e}[1;31m$(tr error_permission)${e}[0m"$'\n'
-        sb+="  $(tr target_path): $vivaldi_dir"$'\n'
-        sb+="${e}[90m$(tr error_admin_required)${e}[0m"$'\n\n'
-        sb+="  ${e}[90m$(tr key_exit)${e}[0m"$'\n'
-        write_frame "$sb"; read_key > /dev/null
+        show_permission_error_frame "$vivaldi_dir"
         return 1
     fi
 
@@ -1698,11 +1728,7 @@ do_uninstall() {
 
         # Permission check
         if ! test_writable "$vivaldi_dir"; then
-            local sb="${e}[1;31m$(tr error_permission)${e}[0m"$'\n'
-            sb+="  $(tr target_path): $vivaldi_dir"$'\n'
-            sb+="${e}[90m$(tr error_admin_required)${e}[0m"$'\n\n'
-            sb+="  ${e}[90m$(tr key_exit)${e}[0m"$'\n'
-            write_frame "$sb"; read_key > /dev/null
+            show_permission_error_frame "$vivaldi_dir"
             return 1
         fi
 
@@ -1774,9 +1800,11 @@ main() {
             local result=""
             case "$action" in
                 manage) ensure_mod_source || break; manage_flow "$SOURCE_DIR" "$vivaldi_dir" "$app_path"
-                        [ "$FLOW_RESULT" = "back_to_menu" ] && { FLOW_RESULT=""; continue; }; result="done" ;;
+                        [ "$FLOW_RESULT" = "back_to_menu" ] && { FLOW_RESULT=""; continue; }
+                        [ "$FLOW_RESULT" = "permission_error" ] && exit_installer; result="done" ;;
                 update) ensure_mod_source || break; do_update "$SOURCE_DIR" "$vivaldi_dir"; result="done" ;;
                 uninstall) do_uninstall "$vivaldi_dir" "$app_path"
+                    [ "$FLOW_RESULT" = "permission_error" ] && exit_installer
                     # Re-check state after uninstall — may have removed everything
                     is_installed=0; is_installed "$vivaldi_dir" && is_installed=1
                     has_state=0; get_install_state "$vivaldi_dir" 2>/dev/null && has_state=1
@@ -1866,6 +1894,7 @@ main() {
                 ensure_mod_source || break
                 install_flow "$SOURCE_DIR" "$vivaldi_dir" "$app_path" "" ""
                 [ "$FLOW_RESULT" = "back_to_menu" ] && { FLOW_RESULT=""; continue; }
+                [ "$FLOW_RESULT" = "permission_error" ] && exit_installer
                 post_install "$app_path"
             else exit_installer; fi
             break
