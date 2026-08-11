@@ -32,6 +32,12 @@ irm https://raw.githubusercontent.com/PaRr0tBoY/Awesome-Vivaldi/main/install.ps1
 curl -fsSL https://raw.githubusercontent.com/PaRr0tBoY/Awesome-Vivaldi/main/install.sh | bash
 ```
 
+**Linux** (bash):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/PaRr0tBoY/Awesome-Vivaldi/main/install.sh | sudo bash
+```
+
 To uninstall, run the same script again.
 
 > Prefer manual setup? See the **[Installation Guide](./Vivaldi8.0Stable/README.md)**.
